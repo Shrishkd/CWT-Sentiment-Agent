@@ -82,14 +82,23 @@ def fetch_x_posts(api_token, actor_id, max_items=500):
 
     client = ApifyClient(api_token)
 
+    # Actor '61RPP7dywgiy0JPD0' (apidojo/tweet-scraper) requires inline
+    # Twitter search operators inside searchTerms (not top-level start/end keys).
+    # To cover the 180-day window, partition the timeline into targeted query slices.
+    days_step = 45
+    search_queries = []
+    current_start = START_DATE
+    while current_start < END_DATE:
+        current_end = min(current_start + pd.Timedelta(days=days_step), pd.to_datetime(END_DATE)).date()
+        query = f"($BTC OR Bitcoin) lang:en since:{current_start.isoformat()} until:{current_end.isoformat()}"
+        search_queries.append(query)
+        current_start = current_end
+
+    # Also add standard keyword queries for general recent coverage
+    search_queries.append(f"($BTC OR Bitcoin) lang:en since:{START_DATE.isoformat()} until:{END_DATE.isoformat()}")
+
     actor_input = {
-        "searchTerms": [
-            "$BTC",
-            "Bitcoin",
-            "BTC price",
-        ],
-        "start": START_DATE.isoformat(),
-        "end": END_DATE.isoformat(),
+        "searchTerms": search_queries,
         "maxItems": max_items,
         "sort": "Latest",
         "tweetLanguage": "en",
@@ -97,27 +106,57 @@ def fetch_x_posts(api_token, actor_id, max_items=500):
 
     run = client.actor(actor_id).call(
         run_input=actor_input,
-        timeout_secs=300,
     )
 
     if not run:
         raise RuntimeError("The Apify Actor did not return a completed run.")
 
-    dataset_id = run.get("defaultDatasetId")
+    if hasattr(run, "default_dataset_id"):
+        dataset_id = run.default_dataset_id
+    elif isinstance(run, dict):
+        dataset_id = (
+            run.get("defaultDatasetId")
+            or run.get("default_dataset_id")
+        )
+    else:
+        raise RuntimeError(
+            f"Unexpected Apify run type: {type(run).__name__}"
+        )
+
     if not dataset_id:
         raise RuntimeError("Apify run has no default dataset.")
 
-    items = list(
+    new_items = list(
         client.dataset(dataset_id).iterate_items()
     )
 
     output = RAW_DIR / "btc_x_posts.json"
+    existing_items = []
+    if output.exists():
+        try:
+            existing_items = json.loads(output.read_text(encoding="utf-8"))
+        except Exception:
+            existing_items = []
+
+    # Merge and deduplicate by post id
+    merged_by_id = {}
+    for item in existing_items:
+        item_id = item.get("id") or item.get("url")
+        if item_id:
+            merged_by_id[str(item_id)] = item
+    for item in new_items:
+        item_id = item.get("id") or item.get("url")
+        if item_id:
+            merged_by_id[str(item_id)] = item
+
+    all_items = list(merged_by_id.values()) if merged_by_id else (new_items or existing_items)
+
     output.write_text(
-        json.dumps(items, indent=2, ensure_ascii=False, default=str),
+        json.dumps(all_items, indent=2, ensure_ascii=False, default=str),
         encoding="utf-8",
     )
 
-    return items
+    return all_items
 
 
 def ingestion_status():

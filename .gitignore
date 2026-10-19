@@ -1,10 +1,34 @@
+# Virtual environment
 .venv/
+env/
+venv/
+
+# Python bytecode and caches
 __pycache__/
 *.py[cod]
-.env
-.streamlit/secrets.toml
-data/raw/*
-data/processed/*
-models/*
-reports/*
+*$py.class
 .pytest_cache/
+
+# Environment and secrets
+.env
+.env.*
+.streamlit/secrets.toml
+
+# Generated data artifacts
+data/raw/*
+!data/raw/.gitkeep
+data/processed/*
+!data/processed/.gitkeep
+
+# Models and reports
+models/*
+!models/.gitkeep
+reports/*
+!reports/.gitkeep
+
+# OS and IDE files
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
